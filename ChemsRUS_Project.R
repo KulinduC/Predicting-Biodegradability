@@ -10,8 +10,6 @@ library(gbm)
 library(glmnet)
 library(xgboost)
 
-# New model libs
-
 set.seed(300)
 
 # read data
@@ -22,7 +20,7 @@ cdata.df <- read.csv("data/chems_train.data.csv", header = FALSE)
 colnames(cdata.df) <- featurenames$V1
 
 # keep your original test path style
-tdata.df <- read.csv("~/MATP-4400/data/chems_test.data.csv", header = FALSE)
+tdata.df <- read.csv("data/chems_test.data.csv", header = FALSE)
 colnames(tdata.df) <- featurenames$V1
 
 # Class labels
@@ -74,23 +72,21 @@ fitControl <- trainControl(
   summaryFunction = twoClassSummary,
   savePredictions = "final"
 )
-d
 
 # RANDOM FOREST (caret::rf) + Boruta
-set.seed(401)
 rf_model <- train(
   x = train_selected,
   y = classtrain,
-  method = "rf",                 # randomForest pkg backend
+  method = "rf",
   trControl = fitControl,
   metric = "ROC",
-  tuneLength = 10
+  tuneLength = 5
 )
-pred_rf_cls  <- predict(rf_model, newdata = validation_selected)
+pred_rf_class  <- predict(rf_model, newdata = validation_selected)
 pred_rf_prob <- predict(rf_model, newdata = validation_selected, type = "prob")
 
-cm_rf <- table(Predicted = pred_rf_cls, Actual = classval)
-kable(cm_rf, type = "html", digits = 2, caption = "Actual vs Predicted (Random Forest + Boruta)")
+cm_rf <- table(Predicted = pred_rf_class, Actual = classval) 
+print(kable(cm_rf, digits = 2, caption = "Actual vs Predicted (Random Forest + Boruta)"))
 
 sens_rf <- sensitivity_from_confmat(cm_rf)
 spec_rf <- specificity_from_confmat(cm_rf)
@@ -103,20 +99,19 @@ cat("AUC (RF + Boruta):", round(auc_rf, 3), "\n")
 
 
 # SVM (RBF) + Boruta
-set.seed(402)
 svm_model <- train(
   x = train_selected,
   y = classtrain,
   method = "svmRadial",
   trControl = fitControl,
   metric = "ROC",
-  tuneLength = 10
+  tuneLength = 5
 )
-pred_svm_cls  <- predict(svm_model, newdata = validation_selected)
+pred_svm_class  <- predict(svm_model, newdata = validation_selected)
 pred_svm_prob <- predict(svm_model, newdata = validation_selected, type = "prob")
 
-cm_svm <- table(Predicted = pred_svm_cls, Actual = classval)
-kable(cm_svm, type = "html", digits = 2, caption = "Actual vs Predicted (SVM-RBF + Boruta)")
+cm_svm <- table(Predicted = pred_svm_class, Actual = classval)
+print(kable(cm_svm, digits = 2, caption = "Actual vs Predicted (SVM-RBF + Boruta)"))
 
 sens_svm <- sensitivity_from_confmat(cm_svm)
 spec_svm <- specificity_from_confmat(cm_svm)
@@ -129,7 +124,6 @@ cat("AUC (SVM + Boruta):", round(auc_svm, 3), "\n")
 
 
 # LOGISTIC REGRESSION (GLM binomial) + Boruta
-set.seed(403)
 glm_model <- train(
   x = train_selected,
   y = classtrain,
@@ -138,11 +132,11 @@ glm_model <- train(
   trControl = fitControl,
   metric = "ROC"
 )
-pred_glm_cls  <- predict(glm_model, newdata = validation_selected)
+pred_glm_class  <- predict(glm_model, newdata = validation_selected)
 pred_glm_prob <- predict(glm_model, newdata = validation_selected, type = "prob")
 
-cm_glm <- table(Predicted = pred_glm_cls, Actual = classval)
-kable(cm_glm, type = "html", digits = 2, caption = "Actual vs Predicted (Logistic Regression + Boruta)")
+cm_glm <- table(Predicted = pred_glm_class, Actual = classval)
+print(kable(cm_glm, digits = 2, caption = "Actual vs Predicted (Logistic Regression + Boruta)"))
 
 sens_glm <- sensitivity_from_confmat(cm_glm)
 spec_glm <- specificity_from_confmat(cm_glm)
@@ -155,7 +149,6 @@ cat("AUC (Logistic + Boruta):", round(auc_glm, 3), "\n")
 
 
 # GRADIENT BOOSTING (GBM) + Boruta
-set.seed(404)
 gbm_model <- train(
   x = train_selected,
   y = classtrain,
@@ -163,13 +156,13 @@ gbm_model <- train(
   trControl = fitControl,
   metric = "ROC",
   verbose = FALSE,
-  tuneLength = 10
+  tuneLength = 5
 )
-pred_gbm_cls  <- predict(gbm_model, newdata = validation_selected)
+pred_gbm_class  <- predict(gbm_model, newdata = validation_selected)
 pred_gbm_prob <- predict(gbm_model, newdata = validation_selected, type = "prob")
 
-cm_gbm <- table(Predicted = pred_gbm_cls, Actual = classval)
-kable(cm_gbm, type = "html", digits = 2, caption = "Actual vs Predicted (GBM + Boruta)")
+cm_gbm <- table(Predicted = pred_gbm_class, Actual = classval)
+print(kable(cm_gbm, digits = 2, caption = "Actual vs Predicted (GBM + Boruta)"))
 
 sens_gbm <- sensitivity_from_confmat(cm_gbm)
 spec_gbm <- specificity_from_confmat(cm_gbm)
@@ -182,20 +175,27 @@ cat("AUC (GBM + Boruta):", round(auc_gbm, 3), "\n")
 
 
 # XGBOOST (xgbTree) + Boruta
-set.seed(405)
-xgb_model <- train(
-  x = as.matrix(train_selected),
-  y = classtrain,
-  method = "xgbTree",
-  trControl = fitControl,
-  metric = "ROC",
-  tuneLength = 10
-)
-pred_xgb_cls  <- predict(xgb_model, newdata = as.matrix(validation_selected))
-pred_xgb_prob <- predict(xgb_model, newdata = as.matrix(validation_selected), type = "prob")
+dtrain <- xgb.DMatrix(data = as.matrix(train_selected), 
+                      label = as.numeric(classtrain) - 1)
+dval <- xgb.DMatrix(data = as.matrix(validation_selected))
 
-cm_xgb <- table(Predicted = pred_xgb_cls, Actual = classval)
-kable(cm_xgb, type = "html", digits = 2, caption = "Actual vs Predicted (XGBoost + Boruta)")
+# Train directly
+xgb_model_direct <- xgboost(
+  data = dtrain,
+  nrounds = 100,
+  objective = "binary:logistic",
+  eval_metric = "auc",
+  verbose = 0
+)
+
+# Predict
+pred_xgb_prob_direct <- predict(xgb_model_direct, dval)
+pred_xgb_class_direct <- factor(ifelse(pred_xgb_prob_direct > 0.5, 
+                                       levels(classval)[2], 
+                                       levels(classval)[1]))
+
+cm_xgb <- table(Predicted = pred_xgb_class, Actual = classval)
+print(kable(cm_xgb, digits = 2, caption = "Actual vs Predicted (XGBoost + Boruta)"))
 
 sens_xgb <- sensitivity_from_confmat(cm_xgb)
 spec_xgb <- specificity_from_confmat(cm_xgb)
