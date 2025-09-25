@@ -283,3 +283,7 @@ summary_tbl <- summary_tbl[order(-summary_tbl$AUC, -summary_tbl$Balanced_Accurac
 kable(summary_tbl, digits = 3,
       caption = "Model Comparison on Validation Set (Balanced Accuracy and AUC)")
 ```
+
+## Interpreting the Results  
+
+The comparison of models shows that **tree-based methods performed the strongest** on this dataset. XGBoost achieved the highest balanced accuracy (0.948) with an AUC of 0.985, followed closely by GBM and Random Forest, both of which also reached AUC values near 0.99. These results indicate that tree models are highly effective at capturing the patterns in the data. Logistic Regression, while simpler, still performed reasonably well with a balanced accuracy of 0.832 and an AUC of 0.910, making it a more interpretable but less powerful option. The SVM with an RBF kernel had the lowest scores among the tested models (Balanced Accuracy 0.825, AUC 0.888), suggesting it was less suited for this problem. Overall, the results highlight the advantage of tree models, particularly boosting, for this classification challenge.
