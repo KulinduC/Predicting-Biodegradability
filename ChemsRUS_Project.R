@@ -9,6 +9,8 @@ library(randomForest)
 library(gbm)
 library(glmnet)
 library(xgboost)
+library(ggplot2)
+library(pROC)
 
 set.seed(300)
 
@@ -97,6 +99,13 @@ roc_rf <- roc(response = classval, predictor = as.numeric(pred_rf_prob[, 2]))
 auc_rf <- auc(roc_rf)
 cat("AUC (RF + Boruta):", round(auc_rf, 3), "\n")
 
+ggroc(list("Random Forest" = roc_rf)) +
+  ggtitle(sprintf("Random Forest ROC (AUC = %.3f)", auc_rf)) +
+  theme_minimal() +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray") +
+  scale_color_manual(values = c("Random Forest" = "blue"))
+
+
 
 # SVM (RBF) + Boruta
 svm_model <- train(
@@ -122,6 +131,13 @@ roc_svm <- roc(response = classval, predictor = as.numeric(pred_svm_prob[, 2]))
 auc_svm <- auc(roc_svm)
 cat("AUC (SVM + Boruta):", round(auc_svm, 3), "\n")
 
+ggroc(list("SVM (RBF)" = roc_svm)) +
+  ggtitle(sprintf("SVM (RBF) ROC (AUC = %.3f)", auc_svm)) +
+  theme_minimal() +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray") +
+  scale_color_manual(values = c("SVM (RBF)" = "orange"))
+
+
 
 # LOGISTIC REGRESSION (GLM binomial) + Boruta
 glm_model <- train(
@@ -146,6 +162,13 @@ cat("Balanced Accuracy (Logistic + Boruta):", round(balacc_glm, 3), "\n")
 roc_glm <- roc(response = classval, predictor = as.numeric(pred_glm_prob[, 2]))
 auc_glm <- auc(roc_glm)
 cat("AUC (Logistic + Boruta):", round(auc_glm, 3), "\n")
+
+ggroc(list("Logistic Regression" = roc_glm)) +
+  ggtitle(sprintf("Logistic Regression ROC (AUC = %.3f)", auc_glm)) +
+  theme_minimal() +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray") +
+  scale_color_manual(values = c("Logistic Regression" = "green4"))
+
 
 
 # GRADIENT BOOSTING (GBM) + Boruta
@@ -173,6 +196,13 @@ roc_gbm <- roc(response = classval, predictor = as.numeric(pred_gbm_prob[, 2]))
 auc_gbm <- auc(roc_gbm)
 cat("AUC (GBM + Boruta):", round(auc_gbm, 3), "\n")
 
+ggroc(list("GBM" = roc_gbm)) +
+  ggtitle(sprintf("GBM ROC (AUC = %.3f)", auc_gbm)) +
+  theme_minimal() +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray") +
+  scale_color_manual(values = c("GBM" = "red"))
+
+
 
 # XGBOOST (xgbTree) + Boruta
 dtrain <- xgb.DMatrix(data = as.matrix(train_selected), 
@@ -180,7 +210,7 @@ dtrain <- xgb.DMatrix(data = as.matrix(train_selected),
 dval <- xgb.DMatrix(data = as.matrix(validation_selected))
 
 # Train directly
-xgb_model_direct <- xgboost(
+xgb_model <- xgboost(
   data = dtrain,
   nrounds = 100,
   objective = "binary:logistic",
@@ -189,8 +219,8 @@ xgb_model_direct <- xgboost(
 )
 
 # Predict
-pred_xgb_prob_direct <- predict(xgb_model_direct, dval)
-pred_xgb_class_direct <- factor(ifelse(pred_xgb_prob_direct > 0.5, 
+pred_xgb_prob <- predict(xgb_model, dval)
+pred_xgb_class <- factor(ifelse(pred_xgb_prob > 0.5, 
                                        levels(classval)[2], 
                                        levels(classval)[1]))
 
@@ -202,9 +232,15 @@ spec_xgb <- specificity_from_confmat(cm_xgb)
 balacc_xgb <- (sens_xgb + spec_xgb) / 2
 cat("Balanced Accuracy (XGBoost + Boruta):", round(balacc_xgb, 3), "\n")
 
-roc_xgb <- roc(response = classval, predictor = as.numeric(pred_xgb_prob[, 2]))
+roc_xgb <- roc(response = classval, predictor = pred_xgb_prob)
 auc_xgb <- auc(roc_xgb)
 cat("AUC (XGBoost + Boruta):", round(auc_xgb, 3), "\n")
+
+ggroc(list("XGBoost" = roc_xgb)) +
+  ggtitle(sprintf("XGBoost ROC (AUC = %.3f)", auc_xgb)) +
+  theme_minimal() +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray") +
+  scale_color_manual(values = c("XGBoost" = "purple"))
 
 
 # Final Summary (Validation)

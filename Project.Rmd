@@ -1,0 +1,285 @@
+---
+title: "Predicting Biodegradability with Machine Learning"
+author: "Kulindu Cooray"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+## Introduction
+
+This project explores the application of multiple machine learning models to predict chemical biodegradability.  
+The dataset is split into training and validation subsets, and feature selection is performed using the Boruta algorithm.  
+The following models are evaluated:
+
+- Random Forest (RF)  
+- Support Vector Machine with RBF kernel (SVM-RBF)  
+- Logistic Regression (GLM)  
+- Gradient Boosting Machine (GBM)  
+- Extreme Gradient Boosting (XGBoost)  
+
+Performance is measured using **balanced accuracy** and **area under the ROC curve (AUC)**.
+
+
+## Methods
+
+Several machine learning methods were applied to classify the biodegradability data. The primary classifiers were:
+
+- **Random Forest (RF):** An ensemble of decision trees that splits the data at each node based on a subset of predictors, improving generalization and reducing variance.  
+- **Support Vector Machine (SVM):** A margin-based classifier that constructs a hyperplane (or set of hyperplanes) to best separate the data into two classes.  
+
+For feature selection, two approaches were tested:
+
+- **Recursive Feature Elimination (RFE):** An iterative process that repeatedly builds models and removes the least important features until the optimal subset is identified.  
+- **Variable Importance (rpart):** A tree-based ranking method that assigns importance scores to predictors and selects the most influential variables.  
+
+
+## Data Description
+
+The dataset contained **168 attributes**. Data was split as follows:
+
+- **Training/Validation Split:** The original dataset was split 90:10 into training and validation subsets.  
+- **Independent Test Data:** A separate test set was provided for external evaluation.  
+- **Set Sizes:**  
+  - Training set: 905 observations per feature  
+  - Validation set: 105 observations per feature  
+  - Test set: 400 observations per feature  
+
+All features were standardized using the `preProcess` function with **centering and scaling**.  
+
+
+## Results Using Feature Selection
+
+Boruta feature selection was applied to identify the most relevant predictors before training the models. With this subset:  
+- **GBM + Boruta** and **XGBoost + Boruta** remained the top performers, both achieving excellent discrimination (Balanced Accuracy 0.935 and 0.948; AUC 0.989 and 0.985).  
+- **Random Forest + Boruta** also performed very strongly (Balanced Accuracy 0.922, AUC 0.989).  
+- **Logistic Regression + Boruta** achieved moderate results (Balanced Accuracy 0.832, AUC 0.910).  
+- **SVM (RBF) + Boruta** again lagged behind, with the lowest AUC (0.888).  
+
+Overall, Boruta helped stabilize model performance by focusing on the most important predictors. Ensemble methods benefited most, maintaining near-perfect AUC values, while linear and kernel-based methods struggled to match their performance.  
+
+
+
+
+## Data Preparation
+```{r}
+library(dplyr)
+library(caret)
+library(e1071)
+library(rpart)
+library(Boruta)
+library(pROC)
+library(knitr)
+library(randomForest)
+library(gbm)
+library(glmnet)
+library(xgboost)
+library(ggplot2)
+
+set.seed(300)
+
+# Read feature names
+featurenames <- read.csv("data/chems_feat.name.csv", header = FALSE, colClasses = "character")
+
+# Training and external test data
+cdata.df <- read.csv("data/chems_train.data.csv", header = FALSE)
+colnames(cdata.df) <- featurenames$V1
+tdata.df <- read.csv("data/chems_test.data.csv", header = FALSE)
+colnames(tdata.df) <- featurenames$V1
+
+# Class labels (factor)
+class <- read.csv("data/chems_train.solution.csv", header = FALSE, colClasses = "factor")$V1
+
+# 90/10 split
+n <- nrow(cdata.df)
+ss <- ceiling(n * 0.90)
+train.perm <- sample(1:n, ss)
+
+train <- dplyr::slice(cdata.df, train.perm)
+validation <- dplyr::slice(cdata.df, -train.perm)
+classtrain <- class[train.perm]
+classval <- class[-train.perm]
+
+# Clean factor levels for caret
+levels(classtrain) <- make.names(levels(classtrain), unique = TRUE)
+levels(classval)   <- make.names(levels(classval),   unique = TRUE)
+
+# Standardize
+scaler <- preProcess(train, method = c("center", "scale"))
+train_scaled      <- predict(scaler, train)
+validation_scaled <- predict(scaler, validation)
+test_scaled       <- predict(scaler, tdata.df)
+```
+
+
+
+## Feature Selection (Boruta)
+```{r}
+start_time <- Sys.time()
+boruta_output <- Boruta(train_scaled, classtrain, doTrace = 0)
+end_time <- Sys.time()
+
+cat("Boruta Feature Selection Time:", round(difftime(end_time, start_time, units = "secs"), 2), "seconds\n")
+
+final_features <- getSelectedAttributes(boruta_output, withTentative = TRUE)
+cat("Number of features selected by Boruta:", length(final_features), "\n")
+
+train_selected      <- train_scaled[, final_features, drop = FALSE]
+validation_selected <- validation_scaled[, final_features, drop = FALSE]
+test_selected       <- test_scaled[, final_features, drop = FALSE]
+```
+
+
+## Helpers
+```{r}
+sensitivity_from_confmat <- function(cm) cm[2,2] / sum(cm[,2])   # assumes table(Predicted, Actual)
+specificity_from_confmat <- function(cm) cm[1,1] / sum(cm[,1])
+
+fitControl <- trainControl(
+  method = "cv",
+  number = 10,
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary,
+  savePredictions = "final"
+)
+```
+
+
+
+## Random Forest
+```{r}
+rf_model <- train(
+  x = train_selected, y = classtrain,
+  method = "rf", trControl = fitControl,
+  metric = "ROC", tuneLength = 5
+)
+
+pred_rf_class <- predict(rf_model, newdata = validation_selected)
+pred_rf_prob  <- predict(rf_model, newdata = validation_selected, type = "prob")
+
+cm_rf <- table(Predicted = pred_rf_class, Actual = classval)
+kable(cm_rf, caption = "Confusion Matrix: Random Forest + Boruta")
+
+roc_rf <- roc(response = classval, predictor = as.numeric(pred_rf_prob[, 2]))
+auc_rf <- auc(roc_rf)
+
+ggroc(roc_rf, colour="blue", size=1.1) +
+  ggtitle(sprintf("Random Forest ROC (AUC = %.3f)", auc_rf)) +
+  theme_minimal() +
+  geom_abline(intercept=0, slope=1, linetype="dashed", color="gray50")
+```
+
+
+## SVM (RBF)
+```{r}
+svm_model <- train(
+  x = train_selected, y = classtrain,
+  method = "svmRadial", trControl = fitControl,
+  metric = "ROC", tuneLength = 5
+)
+
+pred_svm_class <- predict(svm_model, newdata = validation_selected)
+pred_svm_prob  <- predict(svm_model, newdata = validation_selected, type = "prob")
+
+cm_svm <- table(Predicted = pred_svm_class, Actual = classval)
+kable(cm_svm, caption = "Confusion Matrix: SVM-RBF + Boruta")
+
+roc_svm <- roc(response = classval, predictor = as.numeric(pred_svm_prob[, 2]))
+auc_svm <- auc(roc_svm)
+
+ggroc(roc_svm, colour="orange", size=1.1) +
+  ggtitle(sprintf("SVM (RBF) ROC (AUC = %.3f)", auc_svm)) +
+  theme_minimal() +
+  geom_abline(intercept=0, slope=1, linetype="dashed", color="gray50")
+```
+
+
+
+
+## Logistic Regression
+```{r}
+glm_model <- train(
+  x = train_selected, y = classtrain,
+  method = "glm", family = "binomial",
+  trControl = fitControl, metric = "ROC"
+)
+
+pred_glm_prob <- predict(glm_model, newdata = validation_selected, type = "prob")
+
+roc_glm <- roc(response = classval, predictor = as.numeric(pred_glm_prob[, 2]))
+auc_glm <- auc(roc_glm)
+
+ggroc(roc_glm, colour="green4", size=1.1) +
+  ggtitle(sprintf("Logistic Regression ROC (AUC = %.3f)", auc_glm)) +
+  theme_minimal() +
+  geom_abline(intercept=0, slope=1, linetype="dashed", color="gray50")
+```
+
+
+## Gradient Boosting (GBM)
+```{r}
+gbm_model <- train(
+  x = train_selected, y = classtrain,
+  method = "gbm", trControl = fitControl,
+  metric = "ROC", verbose = FALSE, tuneLength = 5
+)
+
+pred_gbm_prob <- predict(gbm_model, newdata = validation_selected, type = "prob")
+
+roc_gbm <- roc(response = classval, predictor = as.numeric(pred_gbm_prob[, 2]))
+auc_gbm <- auc(roc_gbm)
+
+ggroc(roc_gbm, colour="red", size=1.1) +
+  ggtitle(sprintf("GBM ROC (AUC = %.3f)", auc_gbm)) +
+  theme_minimal() +
+  geom_abline(intercept=0, slope=1, linetype="dashed", color="gray50")
+```
+
+
+## XGBoost
+```{r}
+dtrain <- xgb.DMatrix(data = as.matrix(train_selected), label = as.numeric(classtrain) - 1)
+dval   <- xgb.DMatrix(data = as.matrix(validation_selected))
+
+xgb_model <- xgboost(
+  data = dtrain, nrounds = 100,
+  objective = "binary:logistic", eval_metric = "auc", verbose = 0
+)
+
+pred_xgb_prob <- predict(xgb_model, dval)
+
+roc_xgb <- roc(response = classval, predictor = pred_xgb_prob)
+auc_xgb <- auc(roc_xgb)
+
+ggroc(roc_xgb, colour="purple", size=1.1) +
+  ggtitle(sprintf("XGBoost ROC (AUC = %.3f)", auc_xgb)) +
+  theme_minimal() +
+  geom_abline(intercept=0, slope=1, linetype="dashed", color="gray50")
+```
+
+
+
+
+## Summary Table (Validation)
+```{r}
+summary_tbl <- data.frame(
+  Model = c("Random Forest + Boruta",
+            "SVM (RBF) + Boruta",
+            "Logistic Regression + Boruta",
+            "GBM + Boruta",
+            "XGBoost + Boruta"),
+  Balanced_Accuracy = c(balacc_rf, balacc_svm, balacc_glm, balacc_gbm, balacc_xgb),
+  AUC               = c(as.numeric(auc_rf), as.numeric(auc_svm),
+                        as.numeric(auc_glm), as.numeric(auc_gbm), as.numeric(auc_xgb))
+)
+
+# Sort by AUC first, then Balanced Accuracy
+summary_tbl <- summary_tbl[order(-summary_tbl$AUC, -summary_tbl$Balanced_Accuracy), ]
+
+kable(summary_tbl, digits = 3,
+      caption = "Model Comparison on Validation Set (Balanced Accuracy and AUC)")
+```
